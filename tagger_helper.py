@@ -5,7 +5,6 @@ import json
 
 WINDOW_TITLE = 'Tagger Helper :)'
 VALID_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.tiff']
-SLIDE = 10
 CHANGE_FACTOR = 5
 DIALOG = '''
 Remember:
@@ -34,218 +33,263 @@ def print_cwd(wd):
     print(out)
     print('-' * len(out))
 
-def draw_text(img, text, size=0.5, width=2):
-    img = cv2.putText(img, text, (200, 200), cv2.FONT_HERSHEY_SIMPLEX,
-                      size, (0, 0, 0), width * 2)
-    img = cv2.putText(img, text, (200, 200), cv2.FONT_HERSHEY_SIMPLEX,
-                      size, (255, 255, 255), width)
+class TaggerHelper(object):
+    
+    def __init__(self):
+        self.boxes = []
+        self.box_idx = -1
+        self.window_title = WINDOW_TITLE
+        self.run_window(WINDOW_TITLE)
 
-    return img
+    def keep_one_box(self):
+        x = self.boxes[self.box_idx]['x']
+        y = self.boxes[self.box_idx]['y']
+        w = self.boxes[self.box_idx]['w']
+        h = self.boxes[self.box_idx]['h']
+        self.reset_boxes(x, y, w, h)
 
-def load_data(file):
-    if os.path.exists(file):
-        with open(file) as f:
-            data = json.load(f)
-        return data['box']
-    else:
-        return
+    def reset_boxes(self, x, y, w, h):
+        self.boxes = []
+        self.create_box(x, y, w, h)
 
-def save_data(file, label, box):
-    out_data = {}
-    out_data['label'] = label
-    out_data['box'] = box
-    with open(file, 'w') as f:
-        json.dump(out_data, f)
+    def create_box(self, x, y, w, h):
+        box = {'x': x, 'y': y, 'w': w, 'h': h}
+        self.boxes.append(box)
+        self.box_idx = len(self.boxes) - 1
 
-def main():
-    # Get folder
-    cwd = os.path.realpath('.')
-    print(DIALOG)
-    print_cwd(cwd)
-    print(DIALOG_INPUT_PATH)
+    def set_box(self, x, y, w, h):
+        box = {'x': x, 'y': y, 'w': w, 'h': h}
+        self.boxes[self.box_idx] = box
 
-    while True:
-        path = input('>> ')
-        if os.path.exists(path):
-            cwd = os.path.realpath(path)
-            print_cwd(cwd)
-            break
-        else:
-            print('--INVALID PATH--')
+    def click_event(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.boxes[self.box_idx]['x'] = x
+            self.boxes[self.box_idx]['y'] = y
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            self.create_box(x, y, self.boxes[self.box_idx]['w'], self.boxes[self.box_idx]['h'])
 
-    # Get files and label
-    label = os.path.basename(cwd)
-    valid_extensions = '|'.join(VALID_EXTENSIONS)
-    files = [os.path.join(cwd, file) for file in os.listdir(cwd)
-             if re.search(valid_extensions, file.lower())]
-    files.sort()
+    def draw_text(self, img, text, size=0.5, width=2):
+        img = cv2.putText(img, text, (200, 200), cv2.FONT_HERSHEY_SIMPLEX,
+                          size, (0, 0, 0), width * 2)
+        img = cv2.putText(img, text, (200, 200), cv2.FONT_HERSHEY_SIMPLEX,
+                          size, (255, 255, 255), width)
 
-    # Check saved files
-    load_saved_files = False
+    def load_data(self, file):
+        if os.path.exists(file):
+            with open(file) as f:
+                data = json.load(f)
+            
+            self.boxes = data['boxes']
+            self.box_idx = len(self.boxes) - 1
 
-    load_options = input('Load saved files y/n? [n]\n')
-    if load_options.lower() == 'y':
-        load_saved_files = True
+    def save_data(self, file, label, boxes):
+        out_data = {}
+        out_data['label'] = label
+        out_data['boxes'] = boxes
+        with open(file, 'w') as f:
+            json.dump(out_data, f)
+    
+    def correct_box(self):
+        if self.boxes[self.box_idx]['x'] < 0:
+            self.boxes[self.box_idx]['x'] = 0
 
-    if not load_saved_files:
-        i = 0
-        while i < len(files):
-            if os.path.exists('%s.json' % files[i].split('.')[0]):
-                del(files[i])
+        if self.boxes[self.box_idx]['y'] < 0:
+            self.boxes[self.box_idx]['y'] = 0
+
+        if self.boxes[self.box_idx]['w'] < 0:
+            self.boxes[self.box_idx]['w'] = abs(self.boxes[self.box_idx]['w'])
+
+        if self.boxes[self.box_idx]['h'] < 0:
+            self.boxes[self.box_idx]['h'] = abs(self.boxes[self.box_idx]['h'])
+
+    def draw_boxes(self, image):
+        for i, box in enumerate(self.boxes):
+            start_x = box['x'] - int((box['w'] / 2))
+            start_y = box['y'] - int((box['h'] / 2))
+            end_x = box['x'] + int((box['w'] / 2))
+            end_y = box['y'] + int((box['h'] / 2))
+            color = (0, 255, 0) if i == self.box_idx else (150, 0, 0)
+            cv2.rectangle(image, (start_x, start_y), (end_x, end_y), color, 2)
+
+    def run_window(self, window_title):
+        cwd = os.path.realpath('.')
+        print(DIALOG)
+        print_cwd(cwd)
+        print(DIALOG_INPUT_PATH)
+
+        while True:
+            path = input('>> ')
+            if os.path.exists(path):
+                cwd = os.path.realpath(path)
+                print_cwd(cwd)
+                break
             else:
-                i += 1
+                print('--INVALID PATH--')
 
-    # Check number of files            
-    if len(files) == 0:
-        print('No files found.')
-        quit()
+        # Get files and label
+        label = os.path.basename(cwd)
+        valid_extensions = '|'.join(VALID_EXTENSIONS)
+        files = [os.path.join(cwd, file) for file in os.listdir(cwd)
+                 if re.search(valid_extensions, file.lower())]
+        files.sort()
 
-    print('%d files founded for label %s.' % (len(files), label))
+        # Check saved files
+        load_saved_files = False
 
-    # Start
-    print('')
-    input('Press Enter to start.')
-    print(INSTRUCTIONS)
+        load_options = input('Load saved files y/n? [n]\n')
+        if load_options.lower() == 'y':
+            load_saved_files = True
 
-    index = 0
-    load_flag = False
-    file = files[index]
-    image = cv2.imread(file)
-    orig = image.copy()
-    slide = SLIDE
-    change_factor = CHANGE_FACTOR
-    height, width, _ = image.shape
-    start_x = round(2 * width / 5 / slide) * slide
-    start_y = round(2 * height / 5 / slide) * slide
-    end_x = round(3 * width / 5 / slide) * slide
-    end_y = round(3 * height / 5 / slide) * slide
+        if not load_saved_files:
+            i = 0
+            while i < len(files):
+                if os.path.exists('%s.json' % files[i].split('.')[0]):
+                    del(files[i])
+                else:
+                    i += 1
 
-    while True:
-        json_file = '%s.json' % file.split('.')[0]
-        image =  orig.copy()
+        # Check number of files            
+        if len(files) == 0:
+            print('No files found.')
+            quit()
 
-        # check json file
-        if not load_flag:
-            temp_box = load_data(json_file)
-            if temp_box is not None:
-                start_x, start_y, end_x, end_y = temp_box
+        print('%d files founded for label %s.' % (len(files), label))
+
+        # Start
+        print('')
+        input('Press Enter to start.')
+        print(INSTRUCTIONS)
+
+        index = 0
+        load_flag = False
+        file = files[index]
+        image = cv2.imread(file)
+        orig = image.copy()
+        change_factor = CHANGE_FACTOR
+        height, width, _ = image.shape
+        img_x = round(width / 2)
+        img_y = round(height / 2)
+        img_w = round(width * 0.1) * 2
+        img_h = round(height * 0.1) * 2
+        self.create_box(img_x, img_y, img_w, img_h)
+
+        cv2.namedWindow(window_title)
+        cv2.setMouseCallback(window_title, self.click_event)
+
+        while True:
+            json_file = '%s.json' % file.split('.')[0]
+            image =  orig.copy()
+
+            # check json file
+            if not load_flag:
+                self.load_data(json_file)
                 load_flag = True
 
-        cv2.rectangle(image, (start_x, start_y), (end_x, end_y), (0, 255, 0), 2)
-        cv2.imshow(WINDOW_TITLE, image)
-        key = cv2.waitKey()
-        # print(key)
+            # draw rectanle
+            self.draw_boxes(image)
+            cv2.imshow(window_title, image)
+            key = cv2.waitKey(1)
+            # print(key)
 
-        # save 
-        if key == ord('f'):
-            confirm_save = image.copy()
-            save_data(json_file, label, (start_x, start_y, end_x, end_y))
-            if not load_saved_files:
-                del(files[index])
+            # save 
+            if key == ord('f'):
+                confirm_save = image.copy()
+                self.save_data(json_file, label, self.boxes)
+                if not load_saved_files:
+                    del(files[index])
                 if index > 0:
                     index -= 1
 
-            draw_text(confirm_save, DIALOG_SAVE % json_file)
-            cv2.imshow(WINDOW_TITLE, confirm_save)
-            cv2.waitKey()
+                self.draw_text(confirm_save, DIALOG_SAVE % json_file)
+                cv2.imshow(window_title, confirm_save)
+                cv2.waitKey(500)
 
-            if index == len(files) - 1:
-                index = 0
-            else:
-                index += 1
+            # move up on arrow up
+            elif key == 82:
+                self.boxes[self.box_idx]['y'] -= change_factor
+
+            # move down on arrow down
+            elif key == 84:
+                self.boxes[self.box_idx]['y'] += change_factor
+
+            # move left on arrow left
+            elif key == 81:
+                self.boxes[self.box_idx]['x'] -= change_factor
+
+            # move right on arrow right
+            elif key == 83:
+                self.boxes[self.box_idx]['x'] += change_factor
             
-            file = files[index]
-            orig = cv2.imread(file)
+            # increase width
+            elif key == ord('d'):
+                self.boxes[self.box_idx]['w'] += change_factor * 2
 
-        # move up on arrow up
-        elif key == 82:
-            start_y -= change_factor
-            end_y -= change_factor
+            # decrease width
+            elif key == ord('a'):
+                self.boxes[self.box_idx]['w'] -= change_factor * 2
 
-        # move down on arrow down
-        elif key == 84:
-            start_y += change_factor
-            end_y += change_factor
+            # increase height
+            elif key == ord('w'):
+                self.boxes[self.box_idx]['h'] += change_factor * 2
 
-        # move left on arrow left
-        elif key == 81:
-            start_x -= change_factor
-            end_x -= change_factor
+            # decrease height
+            elif key == ord('s'):
+                self.boxes[self.box_idx]['h'] -= change_factor * 2
 
-        # move right on arrow right
-        elif key == 83:
-            start_x += change_factor
-            end_x += change_factor
-        
-        # increase width
-        elif key == ord('d'):
-            start_x -= change_factor
-            end_x += change_factor
+            # increase change_factor
+            elif key == ord('e'):
+                change_factor += 1
 
-        # decrease width
-        elif key == ord('a'):
-            start_x += change_factor
-            end_x -= change_factor
+            # decrease change_factor
+            elif key == ord('q') and change_factor > 1:
+                change_factor -= 1
 
-        # increase height
-        elif key == ord('w'):
-            start_y -= change_factor
-            end_y += change_factor
+            # reset settings
+            elif key == ord('r'):
+                change_factor = CHANGE_FACTOR
+                height, width, _ = image.shape
+                t_x = round(width / 2)
+                t_y = round(height / 2)
+                t_w = round(width * 0.1) * 2
+                t_h = round(height * 0.1) * 2
+                reset_boxes(t_x, t_y, t_w, t_h)
 
-        # decrease height
-        elif key == ord('s'):
-            start_y += change_factor
-            end_y -= change_factor
+            # load next file
+            elif key == ord('n'):
+                if index == len(files) - 1:
+                    index = 0
+                else:
+                    index += 1
+                
+                self.keep_one_box()
+                file = files[index]
+                orig = cv2.imread(file)
+                load_flag = False
 
-        # increase change_factor
-        elif key == ord('e'):
-            change_factor += 1
+            # load previous file
+            elif key == ord('b'):
+                if index == 0:
+                    index = len(files) - 1
+                else:
+                    index -= 1
+                
+                self.keep_one_box()
+                file = files[index]
+                orig = cv2.imread(file)
+                load_flag = False
 
-        # decrease change_factor
-        elif key == ord('q') and change_factor > 1:
-            change_factor -= 1
+            # Close
+            elif key == ord('x'):
+                confirm_exit = image.copy()
+                self.draw_text(confirm_exit, DIALOG_EXIT, 2, 5)
+                cv2.imshow(window_title, confirm_exit)
+                key = cv2.waitKey()
 
-        # reset settings
-        elif key == ord('r'):
-            slide = SLIDE
-            change_factor = CHANGE_FACTOR
-            height, width, _ = image.shape
-            start_x = round(2 * width / 5 / slide) * slide
-            start_y = round(2 * height / 5 / slide) * slide
-            end_x = round(3 * width / 5 / slide) * slide
-            end_y = round(3 * height / 5 / slide) * slide
+                if key == ord('y'):
+                    break
 
-        # load next file
-        elif key == ord('n'):
-            if index == len(files) - 1:
-                index = 0
-            else:
-                index += 1
-            
-            file = files[index]
-            orig = cv2.imread(file)
-            load_flag = False
-
-        # load previous file
-        elif key == ord('b'):
-            if index == 0:
-                index = len(files) - 1
-            else:
-                index -= 1
-            
-            file = files[index]
-            orig = cv2.imread(file)
-            load_flag = False
-
-        # Close
-        elif key == ord('x'):
-            confirm_exit = image.copy()
-            draw_text(confirm_exit, DIALOG_EXIT, 2, 5)
-            cv2.imshow(WINDOW_TITLE, confirm_exit)
-            key = cv2.waitKey()
-
-            if key == ord('y'):
-                break
+            self.correct_box()
 
 if __name__ == '__main__':
-    main()
+    # main()
+    app = TaggerHelper()
