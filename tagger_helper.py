@@ -256,7 +256,7 @@ class TaggerHelper(object):
                 t_y = round(height / 2)
                 t_w = round(width * 0.1) * 2
                 t_h = round(height * 0.1) * 2
-                reset_boxes(t_x, t_y, t_w, t_h)
+                self.reset_boxes(t_x, t_y, t_w, t_h)
 
             # load next file
             elif key == ord('n'):
