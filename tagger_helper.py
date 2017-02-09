@@ -18,12 +18,16 @@ INSTRUCTIONS ='''---------------------------
 Move box           : arrows
 Change box size    : wasd
 Change slider size : qe
-Save box           : f
-Reset box          : r
+Save boxes         : f
+Reset boxes        : r
+Previous box       : z
+Next box           : c
+Delete box         : x
+
 Next image         : n
 Previous image     : b
 
-Exit               : x
+Exit               : v
 ---------------------------
 '''
 
@@ -278,8 +282,28 @@ class TaggerHelper(object):
                 orig = cv2.imread(file)
                 load_flag = False
 
-            # Close
+            # activate next box
+            elif key == ord('c'):
+                if self.box_idx == len(self.boxes) - 1:
+                    self.box_idx = 0
+                else:
+                    self.box_idx += 1
+
+            # activate previous box
+            elif key == ord('z'):
+                if self.box_idx == 0:
+                    self.box_idx = len(self.boxes) - 1
+                else:
+                    self.box_idx -= 1
+
+            # remove current box
             elif key == ord('x'):
+                if len(self.boxes) > 1:
+                    self.boxes.pop(self.box_idx)
+                    self.box_idx = len(self.boxes) - 1
+
+            # Close
+            elif key == ord('v'):
                 confirm_exit = image.copy()
                 self.draw_text(confirm_exit, DIALOG_EXIT, 2, 5)
                 cv2.imshow(window_title, confirm_exit)
