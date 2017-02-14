@@ -114,6 +114,10 @@ class TaggerHelper(object):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         template_files = [os.path.join(self.cwd, f) for f in os.listdir(self.cwd)
                           if f.find('_template_') > -1]
+        
+        if len(template_files) == 0:
+            return
+
         n = min(5, len(template_files))
         template_files = np.random.choice(template_files, n, replace=False)
         
