@@ -2,6 +2,9 @@ import os
 import re
 import cv2
 import json
+import util
+import template_match
+import numpy as np
 
 WINDOW_TITLE = 'Tagger Helper :)'
 VALID_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.tiff']
@@ -18,24 +21,21 @@ INSTRUCTIONS ='''---------------------------
 Move box           : arrows
 Change box size    : wasd
 Change slider size : qe
-Save boxes         : f
-Reset boxes        : r
+
 Previous box       : z
-Next box           : c
 Delete box         : x
+Next box           : c
 
-Next image         : n
+Reset boxes        : r
+Save boxes         : f
+Draw suggestions   : v
+
 Previous image     : b
+Next image         : n
 
-Exit               : v
+Exit               : escape
 ---------------------------
 '''
-
-def print_cwd(wd):
-    out = 'Current directory: [%s]' % wd
-    print('-' * len(out))
-    print(out)
-    print('-' * len(out))
 
 class TaggerHelper(object):
     
@@ -86,13 +86,46 @@ class TaggerHelper(object):
             self.boxes = data['boxes']
             self.box_idx = len(self.boxes) - 1
 
-    def save_data(self, file, label, boxes):
+    def save_data(self, image, json_file, label, boxes):
+        # save json
         out_data = {}
         out_data['label'] = label
         out_data['boxes'] = boxes
-        with open(file, 'w') as f:
+        with open(json_file, 'w') as f:
             json.dump(out_data, f)
-    
+
+        # delete current templates
+        template_prename = '%s_template_' % json_file.split('.')[0]
+        rm_files = (os.path.join(self.cwd, f) for f in os.listdir(self.cwd)
+                    if f.find(os.path.basename(template_prename)) > -1)
+        for rm_file in rm_files:
+            os.remove(rm_file)
+
+        # save template: file_template_i.npy
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = util.whboxes2xyboxes(box['x'], box['y'], box['w'], box['h'])
+            template = gray[y1:y2, x1:x2].copy()
+            template = util.template_preprocess(template)
+            np.save('%s%d.npy' % (template_prename, i), template)
+
+
+    def load_suggestions(self, image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        template_files = [os.path.join(self.cwd, f) for f in os.listdir(self.cwd)
+                          if f.find('_template_') > -1]
+        n = min(5, len(template_files))
+        template_files = np.random.choice(template_files, n, replace=False)
+        
+        for template_file in template_files:
+            template = np.load(template_file)
+            template = np.asarray(template)
+            boxes = template_match.get_boxes(gray, template)
+            for box in boxes:
+                wh_box = util.xyboxes2whboxes(*box)
+                self.create_box(*wh_box)
+
+
     def correct_box(self):
         if self.boxes[self.box_idx]['x'] < 0:
             self.boxes[self.box_idx]['x'] = 0
@@ -108,27 +141,26 @@ class TaggerHelper(object):
 
     def draw_boxes(self, image):
         for i, box in enumerate(self.boxes):
-            start_x = box['x'] - int((box['w'] / 2))
-            start_y = box['y'] - int((box['h'] / 2))
-            end_x = box['x'] + int((box['w'] / 2))
-            end_y = box['y'] + int((box['h'] / 2))
+            x1, y1, x2, y2 = util.whboxes2xyboxes(box['x'], box['y'], box['w'], box['h'])
             color = (0, 255, 0) if i == self.box_idx else (150, 0, 0)
-            cv2.rectangle(image, (start_x, start_y), (end_x, end_y), color, 2)
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
 
     def run_window(self, window_title):
         cwd = os.path.realpath('.')
         print(DIALOG)
-        print_cwd(cwd)
+        util.print_cwd(cwd)
         print(DIALOG_INPUT_PATH)
 
         while True:
             path = input('>> ')
             if os.path.exists(path):
                 cwd = os.path.realpath(path)
-                print_cwd(cwd)
+                util.print_cwd(cwd)
                 break
             else:
                 print('--INVALID PATH--')
+
+        self.cwd = cwd
 
         # Get files and label
         label = os.path.basename(cwd)
@@ -147,7 +179,7 @@ class TaggerHelper(object):
         if not load_saved_files:
             i = 0
             while i < len(files):
-                if os.path.exists('%s.json' % files[i].split('.')[0]):
+                if os.path.exists(files[i].split('.')[0]):
                     del(files[i])
                 else:
                     i += 1
@@ -198,7 +230,7 @@ class TaggerHelper(object):
             # save 
             if key == ord('f'):
                 confirm_save = image.copy()
-                self.save_data(json_file, label, self.boxes)
+                self.save_data(orig, json_file, label, self.boxes)
                 if not load_saved_files:
                     del(files[index])
                 if index > 0:
@@ -207,6 +239,10 @@ class TaggerHelper(object):
                 self.draw_text(confirm_save, DIALOG_SAVE % json_file)
                 cv2.imshow(window_title, confirm_save)
                 cv2.waitKey(500)
+
+            # draw suggestions
+            elif key == ord('v'):
+                self.load_suggestions(orig)
 
             # move up on arrow up
             elif key == 82:
@@ -258,18 +294,6 @@ class TaggerHelper(object):
                 t_h = round(height * 0.1) * 2
                 self.reset_boxes(t_x, t_y, t_w, t_h)
 
-            # load next file
-            elif key == ord('n'):
-                if index == len(files) - 1:
-                    index = 0
-                else:
-                    index += 1
-                
-                self.keep_one_box()
-                file = files[index]
-                orig = cv2.imread(file)
-                load_flag = False
-
             # load previous file
             elif key == ord('b'):
                 if index == 0:
@@ -282,12 +306,17 @@ class TaggerHelper(object):
                 orig = cv2.imread(file)
                 load_flag = False
 
-            # activate next box
-            elif key == ord('c'):
-                if self.box_idx == len(self.boxes) - 1:
-                    self.box_idx = 0
+            # load next file
+            elif key == ord('n'):
+                if index == len(files) - 1:
+                    index = 0
                 else:
-                    self.box_idx += 1
+                    index += 1
+                
+                self.keep_one_box()
+                file = files[index]
+                orig = cv2.imread(file)
+                load_flag = False
 
             # activate previous box
             elif key == ord('z'):
@@ -296,6 +325,13 @@ class TaggerHelper(object):
                 else:
                     self.box_idx -= 1
 
+            # activate next box
+            elif key == ord('c'):
+                if self.box_idx == len(self.boxes) - 1:
+                    self.box_idx = 0
+                else:
+                    self.box_idx += 1
+
             # remove current box
             elif key == ord('x'):
                 if len(self.boxes) > 1:
@@ -303,7 +339,7 @@ class TaggerHelper(object):
                     self.box_idx = len(self.boxes) - 1
 
             # Close
-            elif key == ord('v'):
+            elif key == 27:
                 confirm_exit = image.copy()
                 self.draw_text(confirm_exit, DIALOG_EXIT, 2, 5)
                 cv2.imshow(window_title, confirm_exit)
