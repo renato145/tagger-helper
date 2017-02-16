@@ -18,10 +18,11 @@ DIALOG_INPUT_PATH = 'Input data path.'
 DIALOG_EXIT = 'Really want to exit (y)?'
 DIALOG_SAVE = 'File saved on: %s'
 INSTRUCTIONS ='''---------------------------
-Move box           : arrows
+Move box           : arrows - left_click
 Change box size    : wasd
 Change slider size : qe
 
+New box            : right_click
 Previous box       : z
 Delete box         : x
 Next box           : c
@@ -118,36 +119,72 @@ class TaggerHelper(object):
         if len(template_files) == 0:
             return
 
-        n = min(5, len(template_files))
+        n = min(10, len(template_files))
         template_files = np.random.choice(template_files, n, replace=False)
-        
-        for template_file in template_files:
-            template = np.load(template_file)
-            template = np.asarray(template)
-            boxes = template_match.get_boxes(gray, template)
-            for box in boxes:
-                wh_box = util.xyboxes2whboxes(*box)
-                self.create_box(*wh_box)
+        boxes = template_match.get_n_boxes(gray, template_files)
+        height, width, _ = image.shape
+
+        for i, box in enumerate(boxes):
+            if i == 5:
+                break
+            wh_box = util.xyboxes2whboxes(*box)
+            self.create_box(int(wh_box[0]), int(wh_box[1]), int(wh_box[2]), int(wh_box[3]))
+            # self.correct_box(width, height)
 
 
-    def correct_box(self):
-        if self.boxes[self.box_idx]['x'] < 0:
-            self.boxes[self.box_idx]['x'] = 0
+    def correct_box(self, width, height):
+        x = self.boxes[self.box_idx]['x']
+        y = self.boxes[self.box_idx]['y']
+        w = self.boxes[self.box_idx]['w']
+        h = self.boxes[self.box_idx]['h']
 
-        if self.boxes[self.box_idx]['y'] < 0:
-            self.boxes[self.box_idx]['y'] = 0
+        if w < 0:
+            w = abs(w)
 
-        if self.boxes[self.box_idx]['w'] < 0:
-            self.boxes[self.box_idx]['w'] = abs(self.boxes[self.box_idx]['w'])
+        if h < 0:
+            h = abs(h)
 
-        if self.boxes[self.box_idx]['h'] < 0:
-            self.boxes[self.box_idx]['h'] = abs(self.boxes[self.box_idx]['h'])
+        x1, y1, x2, y2 = util.whboxes2xyboxes(x, y, w, h)
+
+        if x1 < 0:
+            x1 = 0
+        elif x1 > width:
+            x1 = width
+
+        if x2 < 0:
+            x2 = 0
+        elif x2 > width:
+            x2 = width        
+
+        if y1 < 0:
+            y1 = 0
+        elif y1 > height:
+            y1 = height
+
+        if y2 < 0:
+            y2 = 0
+        elif y2 > height:
+            y2 = height
+
+        x, y, w, h = util.xyboxes2whboxes(x1, y1, x2, y2)
+
+        self.boxes[self.box_idx]['x'] = x
+        self.boxes[self.box_idx]['y'] = y
+        self.boxes[self.box_idx]['w'] = w
+        self.boxes[self.box_idx]['h'] = h
 
     def draw_boxes(self, image):
         for i, box in enumerate(self.boxes):
             x1, y1, x2, y2 = util.whboxes2xyboxes(box['x'], box['y'], box['w'], box['h'])
             color = (0, 255, 0) if i == self.box_idx else (150, 0, 0)
             cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+
+    def show_exit_dialog(self):
+        n_json = len([x for x in os.listdir(self.cwd) if x.find('.json') > -1])
+        n_imgs = len([x for x in os.listdir(self.cwd) if x.find('.jpg') > -1])
+        n_npy = len([x for x in os.listdir(self.cwd) if x.find('.npy') > -1])
+
+        print('\nlabelled imgs: %d\ntotal imgs: %d\ntotal templates: %d' % (n_json, n_imgs, n_npy))
 
     def run_window(self, window_title):
         cwd = os.path.realpath('.')
@@ -183,7 +220,7 @@ class TaggerHelper(object):
         if not load_saved_files:
             i = 0
             while i < len(files):
-                if os.path.exists(files[i].split('.')[0]):
+                if os.path.exists('%s.json' % files[i].split('.')[0]):
                     del(files[i])
                 else:
                     i += 1
@@ -352,7 +389,10 @@ class TaggerHelper(object):
                 if key == ord('y'):
                     break
 
-            self.correct_box()
+            height, width, _ = image.shape
+            self.correct_box(width, height)
+
+        self.show_exit_dialog()
 
 if __name__ == '__main__':
     # main()
